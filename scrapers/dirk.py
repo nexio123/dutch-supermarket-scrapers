@@ -120,16 +120,12 @@ class DirkScraper(BaseScraper):
         if product_containers:
             print(f'First container HTML: {product_containers[0].get_attribute("outerHTML")}')
 
-        # Process products in parallel
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            results = list(executor.map(self.process_product, product_containers))
-            
-        # Add successful results to products list
-        for result in results:
+        # Process products
+        for container in product_containers:
+            result = self.process_product(container)
             if result:
                 result['category'] = category
                 self.products.append(result)
-                print(f'Added {result["name"]} - {result["price"]}')
 
     def scrape(self):
         print('Starting Dirk scraper...')
@@ -156,10 +152,16 @@ class DirkScraper(BaseScraper):
         except Exception as e:
             print(f'Cookie handling error: {str(e)}')
 
-        # Process categories
-        for term, url in self.search_terms.items():
-            try:
-                print(f'\nProcessing category: {term}')
-                self.scrape_category(term, url)
-            except Exception as e:
-                print(f'Error processing category {term}: {str(e)}')
+        # Just scrape melk for testing
+        try:
+            print('\nProcessing category: melk')
+            self.scrape_category('melk', 'https://www.dirk.nl/zoeken/producten/melk')
+        except Exception as e:
+            print(f'Error processing category: {str(e)}')
+
+        # Save results
+        self.save_results()
+
+if __name__ == '__main__':
+    scraper = DirkScraper()
+    scraper.scrape()
