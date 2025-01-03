@@ -1,113 +1,94 @@
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.keys import Keys
+from selenium.common.exceptions import TimeoutException
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .base import BaseScraper
 import time
 
 class DirkScraper(BaseScraper):
     def __init__(self):
         super().__init__()
-        self.base_url = 'https://www.dirk.nl/zoeken/producten'
-        # Common product searches to get a good coverage
-        self.search_terms = [
-            'melk',
-            'brood',
-            'kaas',
-            'groente',
-            'fruit',
-            'vlees',
-            'kip',
-            'vis',
-            'drinken',
-            'snack'
-        ]
+        self.base_url = 'https://www.dirk.nl/zoeken/producten/melk'
+
+    def get_price(self, price_container):
+        """Extract price from container, handling different formats"""
+        try:
+            # Try euros first
+            try:
+                euros = price_container.find_element(By.CSS_SELECTOR, '.hasEuros.price-large').text
+                cents = price_container.find_element(By.CSS_SELECTOR, '.price-small').text
+                return f'€{euros},{cents}'
+            except:
+                # Cents only
+                cents = price_container.find_element(By.CSS_SELECTOR, '.price-large').text
+                return f'€0,{cents}'
+        except:
+            return None
+
+    def process_product(self, product):
+        """Process a single product element"""
+        try:
+            # Basic info with fast selectors
+            name = product.find_element(By.CSS_SELECTOR, 'img.main-image').get_attribute('alt')
+            url = product.find_element(By.CSS_SELECTOR, 'a').get_attribute('href')
+            quantity = product.find_element(By.CSS_SELECTOR, '.subtitle').text
+
+            # Price processing
+            price_container = product.find_element(By.CSS_SELECTOR, '.price-container')
+            price = self.get_price(price_container)
+
+            # Promotion check - only if we see price-label
+            promo = None
+            if price_container.find_elements(By.CSS_SELECTOR, '.price-label'):
+                regular = price_container.find_element(By.CSS_SELECTOR, '.regular-price').text
+                regular = regular.replace('van ', '')
+                promo = f'ACTIE - Normaal {regular}'
+
+            return {
+                'name': name,
+                'price': price if price else 'Price not found',
+                'quantity': quantity,
+                'promotion': promo,
+                'url': url,
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+
+        except Exception as e:
+            print(f'Error processing product: {str(e)}')
+            return None
 
     def scrape(self):
         print('Starting Dirk scraper...')
-        self.driver.get(self.base_url)
-        time.sleep(5)  # Wait for page to load
         
-        # Accept cookies if present
+        # Load page and wait for products
+        self.driver.get(self.base_url)
         try:
-            cookie_button = self.driver.find_element(By.ID, 'accept-all-button')
-            if cookie_button:
-                print('Found cookie button, clicking...')
-                cookie_button.click()
-                time.sleep(2)
-        except Exception as e:
-            print(f'Cookie handling error: {str(e)}')
+            WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'article'))
+            )
+        except TimeoutException:
+            print('Timeout waiting for products to load')
+            return
 
-        # Process each search term
-        for term in self.search_terms:
-            try:
-                print(f'\nSearching for: {term}')
-                self.search_and_scrape(term)
-            except Exception as e:
-                print(f'Error processing search term {term}: {str(e)}')
+        # Get all products at once
+        products = self.driver.find_elements(By.CSS_SELECTOR, 'article')
+        print(f'Found {len(products)} products')
 
-    def search_and_scrape(self, search_term):
-        try:
-            # Find and clear the search box
-            search_box = self.driver.find_element(By.CSS_SELECTOR, 'input[type="search"]')
-            search_box.clear()
-            time.sleep(1)
+        # Process products in parallel
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            future_to_product = {executor.submit(self.process_product, product): product 
+                               for product in products}
             
-            # Enter search term and submit
-            search_box.send_keys(search_term)
-            search_box.send_keys(Keys.RETURN)
-            time.sleep(3)  # Wait for results to load
+            for future in as_completed(future_to_product):
+                result = future.result()
+                if result:
+                    self.products.append(result)
+                    print(f'Added product: {result["name"]} - {result["price"]} - {result["quantity"]}')
+                    if result["promotion"]:
+                        print(f'  Promotion: {result["promotion"]}')
 
-            # Scroll to load all products
-            last_height = self.driver.execute_script('return document.body.scrollHeight')
-            while True:
-                self.driver.execute_script('window.scrollTo(0, document.body.scrollHeight);')
-                time.sleep(2)
-                new_height = self.driver.execute_script('return document.body.scrollHeight')
-                if new_height == last_height:
-                    break
-                last_height = new_height
-
-            # Extract product information
-            products = self.driver.find_elements(By.CSS_SELECTOR, '[data-testid="product-card"]')
-            print(f'Found {len(products)} products for search term: {search_term}')
-
-            for product in products:
-                try:
-                    # Get product name
-                    name_elem = product.find_element(By.CSS_SELECTOR, '[data-testid="product-card-name"]')
-                    
-                    # Get price elements
-                    price_elem = product.find_element(By.CSS_SELECTOR, '[data-testid="product-card-price"]')
-                    
-                    product_data = {
-                        'category': search_term,
-                        'name': name_elem.text.strip(),
-                        'price': price_elem.text.strip(),
-                        'url': product.find_element(By.CSS_SELECTOR, 'a').get_attribute('href'),
-                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                    }
-
-                    # Try to get unit price if available
-                    try:
-                        unit_elem = product.find_element(By.CSS_SELECTOR, '[data-testid="product-card-unit-price"]')
-                        product_data['unit'] = unit_elem.text.strip()
-                    except:
-                        product_data['unit'] = None
-
-                    # Try to get promotion if available
-                    try:
-                        promo_elem = product.find_element(By.CSS_SELECTOR, '[data-testid="product-card-promotion"]')
-                        product_data['promotion'] = promo_elem.text.strip()
-                    except:
-                        product_data['promotion'] = None
-
-                    self.products.append(product_data)
-                    print(f'Added product: {product_data["name"]} - {product_data["price"]}')
-
-                except Exception as e:
-                    print(f'Error extracting product data: {str(e)}')
-                    continue
-
-        except Exception as e:
-            print(f'Error searching for term {search_term}: {str(e)}')
+if __name__ == '__main__':
+    scraper = DirkScraper()
+    scraper.scrape()
+    scraper.save_results()

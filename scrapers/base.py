@@ -17,12 +17,14 @@ class BaseScraper(ABC):
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-notifications')
-        chrome_options.add_argument('--lang=nl')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--disable-software-rasterizer')
+        chrome_options.page_load_strategy = 'eager'  # Don't wait for ads
         
         service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
-        self.driver.implicitly_wait(10)
+        self.driver.set_script_timeout(5)
+        self.driver.implicitly_wait(1)  # Reduced from default 10
 
     @abstractmethod
     def scrape(self):
