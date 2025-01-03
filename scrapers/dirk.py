@@ -12,19 +12,18 @@ class DirkScraper(BaseScraper):
     def get_price(self, price_container):
         """Extract price from container, handling different formats"""
         try:
-            # Try to get full price with both euros and cents
+            # First check if we have euros
             try:
                 euros = price_container.find_element(By.CSS_SELECTOR, '.hasEuros.price-large').text
                 cents = price_container.find_element(By.CSS_SELECTOR, '.price-small').text
                 return f'€{euros},{cents}'
             except:
-                # Try cents-only format
-                try:
-                    cents = price_container.find_element(By.CSS_SELECTOR, '.price-large').text
-                    return f'€0,{cents}'
-                except:
-                    return None
-        except:
+                # No euros found, so this must be cents only
+                cents = price_container.find_element(By.CSS_SELECTOR, '.price-large').text
+                # Convert to decimal format (e.g., 97 -> €0,97)
+                return f'€0,{cents}'
+        except Exception as e:
+            print(f'Error parsing price: {str(e)}')
             return None
 
     def scrape(self):
