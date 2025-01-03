@@ -9,6 +9,24 @@ class DirkScraper(BaseScraper):
         super().__init__()
         self.base_url = 'https://www.dirk.nl/zoeken/producten/melk'
 
+    def get_price(self, price_container):
+        """Extract price from container, handling different formats"""
+        try:
+            # Try to get full price with both euros and cents
+            try:
+                euros = price_container.find_element(By.CSS_SELECTOR, '.hasEuros.price-large').text
+                cents = price_container.find_element(By.CSS_SELECTOR, '.price-small').text
+                return f'€{euros},{cents}'
+            except:
+                # Try cents-only format
+                try:
+                    cents = price_container.find_element(By.CSS_SELECTOR, '.price-large').text
+                    return f'€0,{cents}'
+                except:
+                    return None
+        except:
+            return None
+
     def scrape(self):
         print('Starting Dirk scraper...')
         self.driver.get(self.base_url)
@@ -30,24 +48,16 @@ class DirkScraper(BaseScraper):
                 except:
                     quantity = None
 
-                # Get price components
+                # Get price
                 price_container = product.find_element(By.CSS_SELECTOR, '.price-container')
-                try:
-                    # Check for regular price
-                    euros = price_container.find_element(By.CSS_SELECTOR, '.price-large').text
-                    try:
-                        cents = price_container.find_element(By.CSS_SELECTOR, '.price-small').text
-                        price = f'€{euros},{cents}'
-                    except:
-                        price = f'€{euros},00'
-                except:
-                    price = 'Price not found'
+                price = self.get_price(price_container)
 
                 # Check for promotional price
                 try:
                     promo_label = price_container.find_element(By.CSS_SELECTOR, '.price-label')
-                    if promo_label:
-                        regular_price = promo_label.find_element(By.CSS_SELECTOR, '.regular-price').text
+                    regular_price = promo_label.find_element(By.CSS_SELECTOR, '.regular-price').text
+                    if regular_price:
+                        regular_price = regular_price.replace('van ', '')
                         promo = f'ACTIE - Normaal {regular_price}'
                     else:
                         promo = None
@@ -56,7 +66,7 @@ class DirkScraper(BaseScraper):
 
                 product_data = {
                     'name': name,
-                    'price': price,
+                    'price': price if price else 'Price not found',
                     'quantity': quantity,
                     'promotion': promo,
                     'url': product_url,
@@ -65,6 +75,8 @@ class DirkScraper(BaseScraper):
 
                 self.products.append(product_data)
                 print(f'Added product: {name} - {price} - {quantity}')
+                if promo:
+                    print(f'  Promotion: {promo}')
 
             except Exception as e:
                 print(f'Error extracting product data: {str(e)}')
