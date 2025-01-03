@@ -44,81 +44,60 @@ class DirkScraper(BaseScraper):
         time.sleep(5)
         
         print(f'Scraping URL: {url}')
-        print(f'Current page title: {self.driver.title}')
 
-        # Print all elements with 'product' in their attributes
-        elements = self.driver.find_elements(By.CSS_SELECTOR, '[class*="product"], [id*="product"]')
-        print(f'Found {len(elements)} elements containing "product" in class or id')
-        for elem in elements[:5]:  # Print first 5 as sample
-            print(f'Product element found:')
-            print(f'  Tag: {elem.tag_name}')
-            print(f'  Class: {elem.get_attribute("class")}')
-            print(f'  ID: {elem.get_attribute("id")}')
-            print(f'  Text: {elem.text[:100]}...')
+        # Find all product links (these contain the product names and URLs)
+        product_links = self.driver.find_elements(By.CSS_SELECTOR, 'a[aria-label="Bekijk product"]')
+        print(f'Found {len(product_links)} product links')
 
-        # Try multiple selectors for product grid
-        selectors = [
-            '[data-test-id="product-grid-item"]',
-            '.product-grid-item',
-            '[class*="ProductCard"]',
-            '[class*="product-card"]',
-            '[class*="productCard"]',
-            'article',
-            '.grid-item'
-        ]
-
-        products_found = False
-        for selector in selectors:
+        for link in product_links:
             try:
-                products = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                if products:
-                    print(f'\nFound {len(products)} products with selector: {selector}')
-                    print(f'Sample product HTML:')
-                    print(products[0].get_attribute('outerHTML')[:500])
-                    products_found = True
+                # Get the product container (parent element)
+                product_container = link.find_element(By.XPATH, '..')
+                
+                # Get product name from image alt text
+                product_img = link.find_element(By.CSS_SELECTOR, 'img.main-image')
+                name = product_img.get_attribute('alt')
+                product_url = link.get_attribute('href')
 
-                    for product in products:
-                        try:
-                            # Get all text and divide into lines
-                            product_text = product.text
-                            print(f'\nRaw product text:\n{product_text}')
-                            
-                            lines = [l.strip() for l in product_text.split('\n') if l.strip()]
-                            
-                            if lines:  # Only process if we have some text
-                                product_data = {
-                                    'category': category,
-                                    'name': lines[0],  # First line is usually the name
-                                    'price': next((l for l in lines if '€' in l), 'Unknown'),
-                                    'url': url,
-                                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                                }
-                                
-                                # Try to get unit price
-                                unit_price = next((l for l in lines if 'per' in l.lower()), None)
-                                if unit_price:
-                                    product_data['unit'] = unit_price
-                                
-                                # Try to get promotion
-                                promo = next((l for l in lines if any(w in l.lower() for w in ['korting', 'aanbieding', 'actie'])), None)
-                                if promo:
-                                    product_data['promotion'] = promo
+                # Find the price container
+                price_container = product_container.find_element(By.CSS_SELECTOR, '.price-container')
+                
+                # Get euros and cents
+                euros = price_container.find_element(By.CSS_SELECTOR, '.price-large').text
+                cents = price_container.find_element(By.CSS_SELECTOR, '.price-small').text
+                
+                # Combine into full price
+                price = f'€{euros},{cents}'
 
-                                self.products.append(product_data)
-                                print(f'Added product: {product_data["name"]} - {product_data["price"]}')
+                # Try to get unit price if available
+                unit_price = None
+                try:
+                    unit_price_elem = product_container.find_element(By.CSS_SELECTOR, '[class*="unit-price"]')
+                    unit_price = unit_price_elem.text
+                except:
+                    pass
 
-                        except Exception as e:
-                            print(f'Error extracting product data: {str(e)}')
-                            continue
+                # Try to get promotion if available
+                promotion = None
+                try:
+                    promo_elem = product_container.find_element(By.CSS_SELECTOR, '[class*="promotion"]')
+                    promotion = promo_elem.text
+                except:
+                    pass
 
-                    if products_found:
-                        break
+                product_data = {
+                    'category': category,
+                    'name': name,
+                    'price': price,
+                    'unit_price': unit_price,
+                    'promotion': promotion,
+                    'url': 'https://www.dirk.nl' + product_url if product_url.startswith('/') else product_url,
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+
+                self.products.append(product_data)
+                print(f'Added product: {name} - {price}')
 
             except Exception as e:
-                print(f'Error with selector {selector}: {str(e)}')
-
-        if not products_found:
-            print('\nNo products found with any selector')
-            # Print page source for debugging
-            print('\nPage source preview:')
-            print(self.driver.page_source[:1000])
+                print(f'Error extracting product data: {str(e)}')
+                continue
