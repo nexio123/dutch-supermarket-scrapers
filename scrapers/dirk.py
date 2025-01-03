@@ -8,18 +8,10 @@ import time
 class DirkScraper(BaseScraper):
     def __init__(self):
         super().__init__()
-        # Define search terms and their direct URLs
         self.search_terms = {
             'melk': 'https://www.dirk.nl/zoeken/producten/melk',
             'brood': 'https://www.dirk.nl/zoeken/producten/brood',
-            'kaas': 'https://www.dirk.nl/zoeken/producten/kaas',
-            'groente': 'https://www.dirk.nl/zoeken/producten/groente',
-            'fruit': 'https://www.dirk.nl/zoeken/producten/fruit',
-            'vlees': 'https://www.dirk.nl/zoeken/producten/vlees',
-            'kip': 'https://www.dirk.nl/zoeken/producten/kip',
-            'vis': 'https://www.dirk.nl/zoeken/producten/vis',
-            'drinken': 'https://www.dirk.nl/zoeken/producten/drinken',
-            'snack': 'https://www.dirk.nl/zoeken/producten/snack'
+            'kaas': 'https://www.dirk.nl/zoeken/producten/kaas'
         }
 
     def scrape(self):
@@ -30,7 +22,7 @@ class DirkScraper(BaseScraper):
         time.sleep(3)
         try:
             cookie_buttons = self.driver.find_elements(By.CSS_SELECTOR, 
-                '[data-test-id="accept-all-cookies-button"], #accept-all-button')
+                '[data-test-id="accept-all-cookies-button"], #accept-all-button, button[class*="cookie"]')
             if cookie_buttons:
                 print('Found cookie button, clicking...')
                 cookie_buttons[0].click()
@@ -43,63 +35,90 @@ class DirkScraper(BaseScraper):
             try:
                 print(f'\nProcessing category: {term}')
                 self.scrape_category(term, url)
-                time.sleep(2)  # Wait between categories
+                time.sleep(2)
             except Exception as e:
                 print(f'Error processing category {term}: {str(e)}')
 
     def scrape_category(self, category, url):
         self.driver.get(url)
-        time.sleep(5)  # Wait for page to load
+        time.sleep(5)
         
         print(f'Scraping URL: {url}')
-        
-        # Scroll to load all products
-        last_height = self.driver.execute_script('return document.body.scrollHeight')
-        while True:
-            self.driver.execute_script('window.scrollTo(0, document.body.scrollHeight);')
-            time.sleep(2)
-            new_height = self.driver.execute_script('return document.body.scrollHeight')
-            if new_height == last_height:
-                break
-            last_height = new_height
+        print(f'Current page title: {self.driver.title}')
 
-        # Look for product cards
-        try:
-            products = self.driver.find_elements(By.CSS_SELECTOR, 
-                '[data-test-id="product-grid-item"], .product-grid-item, [class*="ProductCard"]')
-            print(f'Found {len(products)} products')
+        # Print all elements with 'product' in their attributes
+        elements = self.driver.find_elements(By.CSS_SELECTOR, '[class*="product"], [id*="product"]')
+        print(f'Found {len(elements)} elements containing "product" in class or id')
+        for elem in elements[:5]:  # Print first 5 as sample
+            print(f'Product element found:')
+            print(f'  Tag: {elem.tag_name}')
+            print(f'  Class: {elem.get_attribute("class")}')
+            print(f'  ID: {elem.get_attribute("id")}')
+            print(f'  Text: {elem.text[:100]}...')
 
-            for product in products:
-                try:
-                    # Get all text and divide into lines
-                    product_text = product.text
-                    lines = [l.strip() for l in product_text.split('\n') if l.strip()]
-                    
-                    if lines:  # Only process if we have some text
-                        product_data = {
-                            'category': category,
-                            'name': lines[0],  # First line is usually the name
-                            'price': next((l for l in lines if '€' in l), 'Unknown'),
-                            'url': url,
-                            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                        }
-                        
-                        # Try to get unit price
-                        unit_price = next((l for l in lines if 'per' in l.lower()), None)
-                        if unit_price:
-                            product_data['unit'] = unit_price
-                        
-                        # Try to get promotion
-                        promo = next((l for l in lines if any(w in l.lower() for w in ['korting', 'aanbieding', 'actie'])), None)
-                        if promo:
-                            product_data['promotion'] = promo
+        # Try multiple selectors for product grid
+        selectors = [
+            '[data-test-id="product-grid-item"]',
+            '.product-grid-item',
+            '[class*="ProductCard"]',
+            '[class*="product-card"]',
+            '[class*="productCard"]',
+            'article',
+            '.grid-item'
+        ]
 
-                        self.products.append(product_data)
-                        print(f'Added product: {product_data["name"]} - {product_data["price"]}')
+        products_found = False
+        for selector in selectors:
+            try:
+                products = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                if products:
+                    print(f'\nFound {len(products)} products with selector: {selector}')
+                    print(f'Sample product HTML:')
+                    print(products[0].get_attribute('outerHTML')[:500])
+                    products_found = True
 
-                except Exception as e:
-                    print(f'Error extracting product data: {str(e)}')
-                    continue
+                    for product in products:
+                        try:
+                            # Get all text and divide into lines
+                            product_text = product.text
+                            print(f'\nRaw product text:\n{product_text}')
+                            
+                            lines = [l.strip() for l in product_text.split('\n') if l.strip()]
+                            
+                            if lines:  # Only process if we have some text
+                                product_data = {
+                                    'category': category,
+                                    'name': lines[0],  # First line is usually the name
+                                    'price': next((l for l in lines if '€' in l), 'Unknown'),
+                                    'url': url,
+                                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                                }
+                                
+                                # Try to get unit price
+                                unit_price = next((l for l in lines if 'per' in l.lower()), None)
+                                if unit_price:
+                                    product_data['unit'] = unit_price
+                                
+                                # Try to get promotion
+                                promo = next((l for l in lines if any(w in l.lower() for w in ['korting', 'aanbieding', 'actie'])), None)
+                                if promo:
+                                    product_data['promotion'] = promo
 
-        except Exception as e:
-            print(f'Error finding products: {str(e)}')
+                                self.products.append(product_data)
+                                print(f'Added product: {product_data["name"]} - {product_data["price"]}')
+
+                        except Exception as e:
+                            print(f'Error extracting product data: {str(e)}')
+                            continue
+
+                    if products_found:
+                        break
+
+            except Exception as e:
+                print(f'Error with selector {selector}: {str(e)}')
+
+        if not products_found:
+            print('\nNo products found with any selector')
+            # Print page source for debugging
+            print('\nPage source preview:')
+            print(self.driver.page_source[:1000])
