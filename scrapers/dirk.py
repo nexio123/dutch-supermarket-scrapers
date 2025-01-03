@@ -47,17 +47,26 @@ class DirkScraper(BaseScraper):
 
     def process_product(self, container):
         try:
+            # Get all text content first
             product_text = container.text
+            print(f'\nProcessing product text: {product_text}')
 
             # Basic product info
             product_link = container.find_element(By.CSS_SELECTOR, 'a[aria-label="Bekijk product"]')
-            product_img = container.find_element(By.CSS_SELECTOR, 'img.main-image')
+            product_img = product_link.find_element(By.CSS_SELECTOR, 'img.main-image')
             name = product_img.get_attribute('alt')
             product_url = product_link.get_attribute('href')
 
-            # Price
-            price_match = self.price_pattern.search(product_text)
-            price = f'€{price_match.group(1)},{price_match.group(2)}' if price_match else 'Price not found'
+            # Find price container and get euros/cents separately
+            try:
+                price_container = container.find_element(By.CSS_SELECTOR, '.price-container')
+                euros = price_container.find_element(By.CSS_SELECTOR, '.price-large').text
+                cents = price_container.find_element(By.CSS_SELECTOR, '.price-small').text
+                price = f'€{euros},{cents}'
+            except:
+                # Fallback to regex if we can't find the elements
+                price_match = self.price_pattern.search(product_text)
+                price = f'€{price_match.group(1)},{price_match.group(2)}' if price_match else 'Price not found'
 
             # Additional info
             volume_weight = self.extract_volume_weight(product_text)
@@ -65,13 +74,13 @@ class DirkScraper(BaseScraper):
 
             # Promotions
             promotion = None
-            if any(keyword in product_text.lower() for keyword in ['korting', 'aanbieding', 'actie', '2e gratis', '1+1']):
-                lines = product_text.split('\n')
-                promotion = next((line.strip() for line in lines 
-                                if any(keyword in line.lower() 
-                                    for keyword in ['korting', 'aanbieding', 'actie', '2e gratis', '1+1'])), None)
+            promo_keywords = ['korting', 'aanbieding', 'actie', '2e gratis', '1+1']
+            for line in product_text.split('\n'):
+                if any(keyword in line.lower() for keyword in promo_keywords):
+                    promotion = line.strip()
+                    break
 
-            return {
+            result = {
                 'name': name,
                 'price': price,
                 'volume_weight': volume_weight,
@@ -80,6 +89,9 @@ class DirkScraper(BaseScraper):
                 'url': 'https://www.dirk.nl' + product_url if product_url.startswith('/') else product_url,
                 'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
             }
+            
+            print(f'Successfully processed {name} - {price}')
+            return result
 
         except Exception as e:
             print(f'Error processing product: {str(e)}')
@@ -87,8 +99,9 @@ class DirkScraper(BaseScraper):
 
     def scrape_category(self, category, url):
         self.driver.get(url)
+        time.sleep(3)  # Wait for dynamic content to load
         
-        # Wait for first product to load
+        # Wait for products to load
         try:
             WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, 'img.main-image'))
@@ -99,9 +112,13 @@ class DirkScraper(BaseScraper):
 
         # Find all product containers
         product_containers = self.driver.find_elements(
-            By.CSS_SELECTOR, 'div[class*="product-card"]'
+            By.CSS_SELECTOR, '[class*="product-card"], [class*="ProductCard"]'
         )
         print(f'Found {len(product_containers)} products in {category}')
+        
+        # Print first container for debugging
+        if product_containers:
+            print(f'First container HTML: {product_containers[0].get_attribute("outerHTML")}')
 
         # Process products in parallel
         with ThreadPoolExecutor(max_workers=4) as executor:
@@ -119,12 +136,23 @@ class DirkScraper(BaseScraper):
         
         # Handle cookie consent once at the start
         self.driver.get('https://www.dirk.nl')
+        time.sleep(3)  # Wait for cookie popup
+        
         try:
-            cookie_button = WebDriverWait(self.driver, 5).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, 
-                    '[data-test-id="accept-all-cookies-button"], #accept-all-button, button[class*="cookie"]'))
-            )
-            cookie_button.click()
+            cookie_buttons = self.driver.find_elements(By.CSS_SELECTOR, 
+                'button[data-test-id="accept-all-cookies-button"], #accept-all-button, [class*="cookie"] button')
+            
+            if cookie_buttons:
+                print(f'Found {len(cookie_buttons)} cookie buttons')
+                for button in cookie_buttons:
+                    try:
+                        if 'accept' in button.text.lower() or 'accepteer' in button.text.lower():
+                            print(f'Clicking cookie button with text: {button.text}')
+                            button.click()
+                            time.sleep(1)
+                            break
+                    except:
+                        continue
         except Exception as e:
             print(f'Cookie handling error: {str(e)}')
 
