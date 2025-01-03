@@ -8,138 +8,98 @@ import time
 class DirkScraper(BaseScraper):
     def __init__(self):
         super().__init__()
-        self.base_url = 'https://www.dirk.nl/zoeken/producten'
-        self.search_terms = [
-            'melk',
-            'brood',
-            'kaas',
-            'groente',
-            'fruit',
-            'vlees',
-            'kip',
-            'vis',
-            'drinken',
-            'snack'
-        ]
+        # Define search terms and their direct URLs
+        self.search_terms = {
+            'melk': 'https://www.dirk.nl/zoeken/producten/melk',
+            'brood': 'https://www.dirk.nl/zoeken/producten/brood',
+            'kaas': 'https://www.dirk.nl/zoeken/producten/kaas',
+            'groente': 'https://www.dirk.nl/zoeken/producten/groente',
+            'fruit': 'https://www.dirk.nl/zoeken/producten/fruit',
+            'vlees': 'https://www.dirk.nl/zoeken/producten/vlees',
+            'kip': 'https://www.dirk.nl/zoeken/producten/kip',
+            'vis': 'https://www.dirk.nl/zoeken/producten/vis',
+            'drinken': 'https://www.dirk.nl/zoeken/producten/drinken',
+            'snack': 'https://www.dirk.nl/zoeken/producten/snack'
+        }
 
     def scrape(self):
         print('Starting Dirk scraper...')
-        self.driver.get(self.base_url)
-        time.sleep(5)  # Wait for page to load
         
-        print(f'Current URL: {self.driver.current_url}')
-        print(f'Page title: {self.driver.title}')
-        
-        # Accept cookies if present
+        # Handle cookie consent once at the start
+        self.driver.get('https://www.dirk.nl')
+        time.sleep(3)
         try:
             cookie_buttons = self.driver.find_elements(By.CSS_SELECTOR, 
-                '#accept-all-button, button[data-test-id="accept-all-cookies-button"]')
+                '[data-test-id="accept-all-cookies-button"], #accept-all-button')
             if cookie_buttons:
-                print(f'Found {len(cookie_buttons)} cookie buttons')
+                print('Found cookie button, clicking...')
                 cookie_buttons[0].click()
                 time.sleep(2)
         except Exception as e:
             print(f'Cookie handling error: {str(e)}')
 
-        # Try to find search box with different selectors
-        search_selectors = [
-            'input[type="search"]',
-            'input[placeholder*="zoek"]',
-            'input[placeholder*="Zoek"]',
-            'input[name="search"]',
-            'input[aria-label*="zoek"]',
-            'input[aria-label*="Zoek"]',
-            '#search-input',
-            '[data-test-id="search-input"]'
-        ]
-        
-        # Print all input elements for debugging
-        print('\nListing all input elements:')
-        inputs = self.driver.find_elements(By.TAG_NAME, 'input')
-        for i, inp in enumerate(inputs):
-            try:
-                print(f'Input {i}:')
-                print(f'  Type: {inp.get_attribute("type")}')
-                print(f'  Name: {inp.get_attribute("name")}')
-                print(f'  ID: {inp.get_attribute("id")}')
-                print(f'  Class: {inp.get_attribute("class")}')
-                print(f'  Placeholder: {inp.get_attribute("placeholder")}')
-            except:
-                print(f'  Error getting input {i} attributes')
-
-        # Try each search selector
-        search_box = None
-        for selector in search_selectors:
-            try:
-                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                if elements:
-                    print(f'Found {len(elements)} elements with selector: {selector}')
-                    search_box = elements[0]
-                    break
-            except Exception as e:
-                print(f'Error with selector {selector}: {str(e)}')
-
-        if not search_box:
-            print('Could not find search box with any selector')
-            return
-
         # Process each search term
-        for term in self.search_terms:
+        for term, url in self.search_terms.items():
             try:
-                print(f'\nSearching for: {term}')
-                # Clear and fill search box
-                search_box.clear()
-                time.sleep(1)
-                search_box.send_keys(term)
-                time.sleep(1)
-                search_box.send_keys(Keys.RETURN)
-                time.sleep(3)
-
-                # Wait for results and extract products
-                product_selectors = [
-                    '[data-testid="product-card"]',
-                    '[class*="product-card"]',
-                    '[class*="product-item"]',
-                    'article'
-                ]
-
-                products_found = False
-                for selector in product_selectors:
-                    try:
-                        products = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                        if products:
-                            print(f'Found {len(products)} products with selector: {selector}')
-                            products_found = True
-                            
-                            for product in products:
-                                try:
-                                    product_text = product.text
-                                    print(f'Product text: {product_text[:100]}...')
-                                    
-                                    # Try to extract price and name from text
-                                    lines = product_text.split('\n')
-                                    product_data = {
-                                        'category': term,
-                                        'name': lines[0] if lines else 'Unknown',
-                                        'price': next((l for l in lines if '€' in l), 'Unknown'),
-                                        'url': self.driver.current_url,
-                                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                                    }
-                                    
-                                    self.products.append(product_data)
-                                    print(f'Added product: {product_data["name"]} - {product_data["price"]}')
-                                    
-                                except Exception as e:
-                                    print(f'Error extracting product data: {str(e)}')
-                                    continue
-                            
-                            if products_found:
-                                break
-                    except Exception as e:
-                        print(f'Error with product selector {selector}: {str(e)}')
-
-                if not products_found:
-                    print('No products found with any selector')
-
+                print(f'\nProcessing category: {term}')
+                self.scrape_category(term, url)
+                time.sleep(2)  # Wait between categories
             except Exception as e:
-                print(f'Error processing search term {term}: {str(e)}')
+                print(f'Error processing category {term}: {str(e)}')
+
+    def scrape_category(self, category, url):
+        self.driver.get(url)
+        time.sleep(5)  # Wait for page to load
+        
+        print(f'Scraping URL: {url}')
+        
+        # Scroll to load all products
+        last_height = self.driver.execute_script('return document.body.scrollHeight')
+        while True:
+            self.driver.execute_script('window.scrollTo(0, document.body.scrollHeight);')
+            time.sleep(2)
+            new_height = self.driver.execute_script('return document.body.scrollHeight')
+            if new_height == last_height:
+                break
+            last_height = new_height
+
+        # Look for product cards
+        try:
+            products = self.driver.find_elements(By.CSS_SELECTOR, 
+                '[data-test-id="product-grid-item"], .product-grid-item, [class*="ProductCard"]')
+            print(f'Found {len(products)} products')
+
+            for product in products:
+                try:
+                    # Get all text and divide into lines
+                    product_text = product.text
+                    lines = [l.strip() for l in product_text.split('\n') if l.strip()]
+                    
+                    if lines:  # Only process if we have some text
+                        product_data = {
+                            'category': category,
+                            'name': lines[0],  # First line is usually the name
+                            'price': next((l for l in lines if '€' in l), 'Unknown'),
+                            'url': url,
+                            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                        }
+                        
+                        # Try to get unit price
+                        unit_price = next((l for l in lines if 'per' in l.lower()), None)
+                        if unit_price:
+                            product_data['unit'] = unit_price
+                        
+                        # Try to get promotion
+                        promo = next((l for l in lines if any(w in l.lower() for w in ['korting', 'aanbieding', 'actie'])), None)
+                        if promo:
+                            product_data['promotion'] = promo
+
+                        self.products.append(product_data)
+                        print(f'Added product: {product_data["name"]} - {product_data["price"]}')
+
+                except Exception as e:
+                    print(f'Error extracting product data: {str(e)}')
+                    continue
+
+        except Exception as e:
+            print(f'Error finding products: {str(e)}')
